@@ -30,6 +30,7 @@ public class ORMConfigManager {
                 entry.item = obj.get("item").getAsString();
                 if (obj.has("custom_model_data")) entry.customModelData = obj.get("custom_model_data").getAsInt();
                 if (obj.has("nbt")) entry.nbtCondition = obj.get("nbt").getAsJsonObject();
+                if (obj.has("target")) entry.target = obj.get("target").getAsString();
                 entry.texture = obj.get("texture").getAsString();
                 config.overrides.add(entry);
             }
@@ -49,6 +50,7 @@ public class ORMConfigManager {
                 obj.addProperty("item", entry.item);
                 if (entry.hasCustomModelData()) obj.addProperty("custom_model_data", entry.customModelData);
                 if (entry.hasNbtCondition()) obj.add("nbt", entry.nbtCondition);
+                if (entry.hasTarget()) obj.addProperty("target", entry.target);
                 obj.addProperty("texture", entry.texture);
                 array.add(obj);
             }

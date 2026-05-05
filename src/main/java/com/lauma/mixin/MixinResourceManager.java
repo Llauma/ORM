@@ -22,7 +22,9 @@ public class MixinResourceManager {
     )
     private List<ResourcePack> injectOrmPack(List<ResourcePack> packs) {
         List<ResourcePack> modified = new ArrayList<>(packs);
-        modified.add(new ORMResourcePack(ORMConfigManager.load()));
+        // Pass the current pack list so the resolver can read model JSONs
+        // from packs that ship custom-model-data overrides.
+        modified.add(new ORMResourcePack(ORMConfigManager.load(), packs));
         return modified;
     }
 }

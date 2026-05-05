@@ -25,19 +25,20 @@ public class ORMResourcePack implements ResourcePack {
     private final Map<Identifier, Path> overrides;
 
     public ORMResourcePack(ORMConfig config) {
-        this.overrides = build(config);
+        this(config, List.of());
     }
 
-    private static Map<Identifier, Path> build(ORMConfig config) {
-        Map<Identifier, Path> map = new LinkedHashMap<>();
-        for (OverrideEntry entry : config.overrides) {
-            Identifier itemId = Identifier.tryParse(entry.item);
-            if (itemId == null) continue;
+    public ORMResourcePack(ORMConfig config, List<ResourcePack> existingPacks) {
+        this.overrides = build(config, existingPacks);
+    }
 
-            Identifier textureId = Identifier.of(
-                itemId.getNamespace(),
-                "textures/item/" + itemId.getPath() + ".png"
-            );
+    private static Map<Identifier, Path> build(ORMConfig config, List<ResourcePack> existingPacks) {
+        Map<Identifier, Path> map = new LinkedHashMap<>();
+        ModelTextureResolver resolver = new ModelTextureResolver(existingPacks);
+
+        for (OverrideEntry entry : config.overrides) {
+            Identifier textureId = resolveTextureId(entry, resolver);
+            if (textureId == null) continue;
 
             String[] parts = entry.texture.split(":", 2);
             String filePath = parts.length == 2 ? parts[1] : parts[0];
@@ -51,6 +52,41 @@ public class ORMResourcePack implements ResourcePack {
             }
         }
         return map;
+    }
+
+    private static Identifier resolveTextureId(OverrideEntry entry, ModelTextureResolver resolver) {
+        // 1) explicit target wins: "ei:item/regeneration_stick" -> "ei:textures/item/regeneration_stick.png"
+        if (entry.hasTarget()) {
+            Identifier t = Identifier.tryParse(entry.target);
+            if (t != null) {
+                return Identifier.of(t.getNamespace(), "textures/" + t.getPath() + ".png");
+            }
+            OverrideResourceManager.LOGGER.warn("ORM: invalid target id: {}", entry.target);
+        }
+
+        // 2) auto-resolve via the custom-model-data override chain
+        if (entry.hasCustomModelData()) {
+            Identifier resolved = resolver.resolve(entry.item, entry.customModelData);
+            if (resolved != null) {
+                OverrideResourceManager.LOGGER.info(
+                    "ORM: auto-resolved {}#{} -> {}",
+                    entry.item, entry.customModelData, resolved
+                );
+                return resolved;
+            }
+            OverrideResourceManager.LOGGER.warn(
+                "ORM: cannot auto-resolve target for {}#{} - falling back to vanilla item texture",
+                entry.item, entry.customModelData
+            );
+        }
+
+        // 3) fallback: replace the vanilla item texture (original behaviour)
+        Identifier itemId = Identifier.tryParse(entry.item);
+        if (itemId == null) return null;
+        return Identifier.of(
+            itemId.getNamespace(),
+            "textures/item/" + itemId.getPath() + ".png"
+        );
     }
 
     @Override
