@@ -1,0 +1,12 @@
+{
+	"required": true,
+	"package": "com.lauma.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"mixins": [],
+	"client": [
+		"MixinResourceManager"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

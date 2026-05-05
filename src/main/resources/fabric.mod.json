@@ -1,0 +1,30 @@
+{
+	"schemaVersion": 1,
+	"id": "orm",
+	"version": "${version}",
+	"name": "OverrideResourceManager",
+	"description": "Client-side item texture override system keyed by item + custom_model_data + NBT.",
+	"authors": [
+		"Llauma"
+	],
+	"license": "CC0-1.0",
+	"icon": "assets/orm/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"main": [
+			"com.lauma.OverrideResourceManager"
+		],
+		"client": [
+			"com.lauma.OverrideResourceManager"
+		]
+	},
+	"mixins": [
+		"orm.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.19.2",
+		"minecraft": "~1.21.4",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
