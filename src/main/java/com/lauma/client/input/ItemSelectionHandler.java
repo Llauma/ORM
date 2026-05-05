@@ -35,7 +35,6 @@ public class ItemSelectionHandler {
 
     private static ItemStack getHoveredStack(HandledScreen<?> screen) {
         try {
-            // Yarn-mapped field: focusedSlot (protected in HandledScreen)
             Field f = HandledScreen.class.getDeclaredField("focusedSlot");
             f.setAccessible(true);
             Object slot = f.get(screen);
@@ -47,13 +46,13 @@ public class ItemSelectionHandler {
     private static void recordOverride(ItemStack stack) {
         String itemId = ItemStackUtils.getItemId(stack);
         int cmd = NbtExtractor.getCustomModelData(stack);
-        NbtCompound nbt = NbtExtractor.getCustomNbt(stack);
+        String displayName = ItemStackUtils.getDisplayName(stack);
 
         OverrideEntry entry = new OverrideEntry();
         entry.item = itemId;
         if (cmd >= 0) entry.customModelData = cmd;
-        if (nbt != null && !nbt.isEmpty()) {
-            entry.nbtCondition = nbtToJson(nbt);
+        if (displayName != null && !displayName.isEmpty()) {
+            entry.name = displayName;
         }
         // Placeholder texture path — user fills in actual PNG name
         String texName = itemId.replace(":", "/") + (cmd >= 0 ? "_" + cmd : "");
@@ -62,9 +61,13 @@ public class ItemSelectionHandler {
         ORMConfig config = TextureOverrideManager.INSTANCE.getConfig();
         config.overrides.add(entry);
         ORMConfigManager.save(config);
-        OverrideResourceManager.LOGGER.info("ORM: recorded override for {} → {}", itemId, entry.texture);
+        OverrideResourceManager.LOGGER.info(
+                "ORM: recorded override for {} (cmd={}, name={}) -> {} -- edit texture in config and run F3+T",
+                itemId, cmd, displayName, entry.texture
+        );
     }
 
+    // kept for compatibility, no longer used by recordOverride
     private static JsonObject nbtToJson(NbtCompound nbt) {
         JsonObject obj = new JsonObject();
         for (String key : nbt.getKeys()) {
@@ -76,7 +79,6 @@ public class ItemSelectionHandler {
             } else if (el instanceof NbtCompound nested) {
                 obj.add(key, nbtToJson(nested));
             }
-            // Arrays/lists skipped for simplicity
         }
         return obj;
     }

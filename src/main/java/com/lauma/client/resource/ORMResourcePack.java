@@ -62,7 +62,7 @@ public class ORMResourcePack implements ResourcePack {
                 continue;
             }
 
-            if (entry.hasNbtCondition()) {
+            if (entry.isPerInstance()) {
                 String fp = OverrideFingerprint.of(entry);
                 Identifier spriteFile = Identifier.of(
                         "minecraft",

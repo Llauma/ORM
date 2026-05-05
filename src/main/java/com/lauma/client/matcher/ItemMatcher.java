@@ -13,6 +13,7 @@ public class ItemMatcher {
     public static boolean matches(MatchContext ctx, OverrideEntry entry) {
         if (!ctx.itemId().equals(entry.item)) return false;
         if (entry.hasCustomModelData() && ctx.customModelData() != entry.customModelData) return false;
+        if (entry.hasName() && !entry.name.equals(ctx.displayName())) return false;
         if (entry.hasNbtCondition() && !nbtPartialMatch(ctx.nbt(), entry.nbtCondition)) return false;
         return true;
     }

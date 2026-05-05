@@ -14,13 +14,13 @@ public final class OverrideRegistry {
     public synchronized void clear() { spriteIdByFingerprint.clear(); }
 
     public synchronized void register(OverrideEntry entry) {
-        if (!entry.hasNbtCondition()) return;
+        if (!entry.isPerInstance()) return;
         String fp = OverrideFingerprint.of(entry);
         spriteIdByFingerprint.put(fp, Identifier.of("minecraft", "orm_overrides/" + fp));
     }
 
     public synchronized Identifier getSpriteId(OverrideEntry entry) {
-        if (!entry.hasNbtCondition()) return null;
+        if (!entry.isPerInstance()) return null;
         return spriteIdByFingerprint.get(OverrideFingerprint.of(entry));
     }
 

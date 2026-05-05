@@ -25,6 +25,7 @@ public class MatchPriorityResolver {
         int p = 1;
         if (entry.hasCustomModelData()) p += 2;
         if (entry.hasNbtCondition()) p += 1;
+        if (entry.hasName()) p += 1;
         return p;
     }
 }

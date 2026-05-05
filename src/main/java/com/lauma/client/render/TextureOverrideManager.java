@@ -13,13 +13,16 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.util.Identifier;
 
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 
 public class TextureOverrideManager {
     public static final TextureOverrideManager INSTANCE = new TextureOverrideManager();
 
     private ORMConfig config = new ORMConfig();
     private final TextureCache cache = new TextureCache();
+    private final Set<String> diagnosedItems = new HashSet<>();
 
     public void reload() {
         cache.clear();
@@ -28,17 +31,12 @@ public class TextureOverrideManager {
     }
 
     public Identifier resolveTexture(ItemStack stack) {
-        if (stack.isEmpty()) return null;
-        String itemId = ItemStackUtils.getItemId(stack);
-        int cmd = NbtExtractor.getCustomModelData(stack);
-        NbtCompound nbt = NbtExtractor.getCustomNbt(stack);
-
-        MatchContext ctx = new MatchContext(itemId, cmd, nbt);
-        Optional<OverrideEntry> match = MatchPriorityResolver.resolve(ctx, config.overrides);
+        Optional<OverrideEntry> match = resolveEntry(stack);
         if (match.isEmpty()) return null;
-        OverrideResourceManager.LOGGER.info("ORM: match found for {} → {}", itemId, match.get().texture);
 
         String texturePath = match.get().texture;
+        int cmd = NbtExtractor.getCustomModelData(stack);
+        NbtCompound nbt = NbtExtractor.getCustomNbt(stack);
         String cacheKey = NbtFingerprintResolver.resolve(cmd, nbt) + "|" + texturePath;
         if (cache.contains(cacheKey)) return cache.get(cacheKey);
 
@@ -52,8 +50,36 @@ public class TextureOverrideManager {
         String itemId = ItemStackUtils.getItemId(stack);
         int cmd = NbtExtractor.getCustomModelData(stack);
         NbtCompound nbt = NbtExtractor.getCustomNbt(stack);
-        MatchContext ctx = new MatchContext(itemId, cmd, nbt);
-        return MatchPriorityResolver.resolve(ctx, config.overrides);
+        String displayName = ItemStackUtils.getDisplayName(stack);
+
+        MatchContext ctx = new MatchContext(itemId, cmd, nbt, displayName);
+        Optional<OverrideEntry> result = MatchPriorityResolver.resolve(ctx, config.overrides);
+
+        if (result.isEmpty()) {
+            boolean hasEntryForThisItem = false;
+            for (OverrideEntry e : config.overrides) {
+                if (itemId.equals(e.item)) { hasEntryForThisItem = true; break; }
+            }
+            if (hasEntryForThisItem) {
+                synchronized (diagnosedItems) {
+                    if (diagnosedItems.add(itemId)) {
+                        OverrideResourceManager.LOGGER.info(
+                                "ORM[diagnose] {} no match. ctx_cmd={}, ctx_name={}, ctx_nbt={}",
+                                itemId, cmd, displayName, (nbt == null ? "null" : nbt.toString())
+                        );
+                        for (OverrideEntry e : config.overrides) {
+                            if (!itemId.equals(e.item)) continue;
+                            OverrideResourceManager.LOGGER.info(
+                                    "ORM[diagnose]   entry: cmd={}, name={}, nbtCondition={}",
+                                    e.customModelData, e.name,
+                                    (e.nbtCondition == null ? "null" : e.nbtCondition.toString())
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     public ORMConfig getConfig() { return config; }

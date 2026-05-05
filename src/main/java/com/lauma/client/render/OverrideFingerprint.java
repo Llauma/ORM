@@ -15,8 +15,15 @@ public final class OverrideFingerprint {
         StringBuilder sb = new StringBuilder();
         sb.append(sanitize(entry.item != null ? entry.item : "unknown"));
         if (entry.hasCustomModelData()) sb.append("__cmd_").append(entry.customModelData);
+        if (entry.hasName()) {
+            sb.append("__name_").append(hashString(entry.name));
+        }
         if (entry.hasNbtCondition()) sb.append("__nbt_").append(canonicalize(entry.nbtCondition));
         return sb.toString();
+    }
+
+    private static String hashString(String s) {
+        return Integer.toHexString(s.hashCode() & 0x7fffffff);
     }
 
     private static String canonicalize(JsonObject obj) {

@@ -9,4 +9,13 @@ public class ItemStackUtils {
         Identifier id = Registries.ITEM.getId(stack.getItem());
         return id.toString();
     }
+
+    public static String getDisplayName(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return null;
+        try {
+            return stack.getName().getString();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 }
