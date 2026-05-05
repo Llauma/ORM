@@ -47,5 +47,14 @@ public class TextureOverrideManager {
         return id;
     }
 
+    public Optional<OverrideEntry> resolveEntry(ItemStack stack) {
+        if (stack.isEmpty()) return Optional.empty();
+        String itemId = ItemStackUtils.getItemId(stack);
+        int cmd = NbtExtractor.getCustomModelData(stack);
+        NbtCompound nbt = NbtExtractor.getCustomNbt(stack);
+        MatchContext ctx = new MatchContext(itemId, cmd, nbt);
+        return MatchPriorityResolver.resolve(ctx, config.overrides);
+    }
+
     public ORMConfig getConfig() { return config; }
 }

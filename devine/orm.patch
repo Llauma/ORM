@@ -1,0 +1,783 @@
+From 19042d4ca3805e6b0878a5a12357a8782683dd66 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=B8=D0=B3=D0=BE=D1=80=D1=8C=20=D0=BD=D0=B5=D0=B0=D0=B4?=
+ =?UTF-8?q?=D1=80=D0=B5=D0=B9?= <stasmytarasov@gmail.com>
+Date: Tue, 5 May 2026 20:38:22 +0000
+Subject: [PATCH] feat: per-instance NBT-keyed texture overrides via
+ render-time sprite substitution
+
+- Introduce OverrideRegistry mapping NBT-conditional config entries to
+  atlas sprite ids (orm_overrides/<fingerprint>).
+- ORMResourcePack now serves additional sprite PNGs and an
+  atlases/blocks.json that adds a directory source so the BLOCK atlas
+  stitches our PNGs in (vanilla merges atlas sources across packs).
+- OverrideBakedModel wraps a vanilla BakedModel and rebakes each
+  BakedQuad with the override sprite, recomputing UV coordinates from
+  the original sprite's atlas region to the new sprite's atlas region.
+- MixinItemRenderer maintains a ThreadLocal<ItemStack> for the duration
+  of a renderItem call.
+- MixinLayerRenderState swaps the BakedModel passed into setModel for
+  the OverrideBakedModel wrapper when the current stack matches an
+  NBT-conditional entry.
+- TextureOverrideManager exposes resolveEntry() so the render mixin can
+  reuse the existing match priority logic.
+
+Co-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+---
+ .../client/render/OverrideBakedModel.java     | 102 ++++++++++++
+ .../client/render/OverrideFingerprint.java    |  74 +++++++++
+ .../lauma/client/render/OverrideRegistry.java |  42 +++++
+ .../lauma/client/render/RenderContext.java    |  26 ++++
+ .../client/render/TextureOverrideManager.java |  26 +++-
+ .../client/resource/ORMResourcePack.java      | 145 ++++++++++++++----
+ .../com/lauma/mixin/MixinItemRenderer.java    |  99 ++++++++++++
+ .../lauma/mixin/MixinLayerRenderState.java    |  71 +++++++++
+ src/main/resources/orm.mixins.json            |   4 +-
+ 9 files changed, 547 insertions(+), 42 deletions(-)
+ create mode 100644 src/main/java/com/lauma/client/render/OverrideBakedModel.java
+ create mode 100644 src/main/java/com/lauma/client/render/OverrideFingerprint.java
+ create mode 100644 src/main/java/com/lauma/client/render/OverrideRegistry.java
+ create mode 100644 src/main/java/com/lauma/client/render/RenderContext.java
+ create mode 100644 src/main/java/com/lauma/mixin/MixinItemRenderer.java
+ create mode 100644 src/main/java/com/lauma/mixin/MixinLayerRenderState.java
+
+diff --git a/src/main/java/com/lauma/client/render/OverrideBakedModel.java b/src/main/java/com/lauma/client/render/OverrideBakedModel.java
+new file mode 100644
+index 0000000..d2b84a5
+--- /dev/null
++++ b/src/main/java/com/lauma/client/render/OverrideBakedModel.java
+@@ -0,0 +1,102 @@
++package com.lauma.client.render;
++
++import net.minecraft.block.BlockState;
++import net.minecraft.client.render.model.BakedModel;
++import net.minecraft.client.render.model.BakedQuad;
++import net.minecraft.client.render.model.json.ModelTransformation;
++import net.minecraft.client.texture.Sprite;
++import net.minecraft.util.math.Direction;
++import net.minecraft.util.math.random.Random;
++import org.jetbrains.annotations.Nullable;
++
++import java.util.ArrayList;
++import java.util.List;
++
++/**
++ * Wraps a BakedModel and substitutes the sprite of every BakedQuad
++ * with {@link #replacement}, recomputing UV coordinates so the new
++ * sprite's atlas region is sampled.
++ *
++ * <p>Vertex data layout (1.21.4 items, POSITION_COLOR_TEXTURE_OVERLAY_LIGHT_NORMAL):
++ * 8 ints per vertex, 4 vertices per quad. UV at offsets 4 (u) and 5 (v),
++ * stored as {@link Float#floatToRawIntBits}.
++ */
++public class OverrideBakedModel implements BakedModel {
++    private static final int VERTEX_STRIDE = 8;
++    private static final int VERTEX_COUNT = 4;
++    private static final int UV_OFFSET = 4;
++
++    private final BakedModel inner;
++    private final Sprite replacement;
++
++    public OverrideBakedModel(BakedModel inner, Sprite replacement) {
++        this.inner = inner;
++        this.replacement = replacement;
++    }
++
++    @Override
++    public List<BakedQuad> getQuads(@Nullable BlockState state, @Nullable Direction face, Random random) {
++        List<BakedQuad> originals = inner.getQuads(state, face, random);
++        if (originals.isEmpty()) return originals;
++        List<BakedQuad> result = new ArrayList<>(originals.size());
++        for (BakedQuad q : originals) {
++            result.add(remap(q));
++        }
++        return result;
++    }
++
++    private BakedQuad remap(BakedQuad src) {
++        Sprite original = src.getSprite();
++        if (original == replacement) return src;
++        int[] data = src.getVertexData().clone();
++        if (data.length < VERTEX_STRIDE * VERTEX_COUNT) {
++            return src;
++        }
++        float origU = original.getMinU();
++        float origV = original.getMinV();
++        float origW = original.getMaxU() - origU;
++        float origH = original.getMaxV() - origV;
++        float newU = replacement.getMinU();
++        float newV = replacement.getMinV();
++        float newW = replacement.getMaxU() - newU;
++        float newH = replacement.getMaxV() - newV;
++        if (origW == 0f || origH == 0f) return src;
++
++        for (int v = 0; v < VERTEX_COUNT; v++) {
++            int uIdx = v * VERTEX_STRIDE + UV_OFFSET;
++            int vIdx = uIdx + 1;
++            float u = Float.intBitsToFloat(data[uIdx]);
++            float vCoord = Float.intBitsToFloat(data[vIdx]);
++            float relU = (u - origU) / origW;
++            float relV = (vCoord - origV) / origH;
++            data[uIdx] = Float.floatToRawIntBits(newU + relU * newW);
++            data[vIdx] = Float.floatToRawIntBits(newV + relV * newH);
++        }
++        return new BakedQuad(data, src.getTintIndex(), src.getFace(), replacement, src.hasShade(), src.getLightEmission());
++    }
++
++    @Override
++    public boolean useAmbientOcclusion() {
++        return inner.useAmbientOcclusion();
++    }
++
++    @Override
++    public boolean hasDepth() {
++        return inner.hasDepth();
++    }
++
++    @Override
++    public boolean isSideLit() {
++        return inner.isSideLit();
++    }
++
++    @Override
++    public Sprite getParticleSprite() {
++        return replacement;
++    }
++
++    @Override
++    public ModelTransformation getTransformation() {
++        return inner.getTransformation();
++    }
++}
+diff --git a/src/main/java/com/lauma/client/render/OverrideFingerprint.java b/src/main/java/com/lauma/client/render/OverrideFingerprint.java
+new file mode 100644
+index 0000000..0e3a976
+--- /dev/null
++++ b/src/main/java/com/lauma/client/render/OverrideFingerprint.java
+@@ -0,0 +1,74 @@
++package com.lauma.client.render;
++
++import com.google.gson.JsonElement;
++import com.google.gson.JsonObject;
++import com.lauma.config.OverrideEntry;
++
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.List;
++
++/**
++ * Deterministic stable string id for an OverrideEntry based on its
++ * matching criteria (item id, CMD, and NBT condition). Used as the
++ * sprite path under {@code orm_overrides/<fingerprint>.png} so that
++ * rebuilds keep matching ids.
++ */
++public final class OverrideFingerprint {
++    private OverrideFingerprint() {}
++
++    public static String of(OverrideEntry entry) {
++        StringBuilder sb = new StringBuilder();
++        sb.append(sanitize(entry.item != null ? entry.item : "unknown"));
++        if (entry.hasCustomModelData()) {
++            sb.append("__cmd_").append(entry.customModelData);
++        }
++        if (entry.hasNbtCondition()) {
++            sb.append("__nbt_").append(canonicalize(entry.nbtCondition));
++        }
++        return sb.toString();
++    }
++
++    private static String canonicalize(JsonObject obj) {
++        StringBuilder sb = new StringBuilder();
++        appendObject(obj, sb);
++        return Integer.toHexString(sb.toString().hashCode() & 0x7fffffff);
++    }
++
++    private static void appendObject(JsonObject obj, StringBuilder sb) {
++        sb.append('{');
++        List<String> keys = new ArrayList<>(obj.keySet());
++        Collections.sort(keys);
++        boolean first = true;
++        for (String k : keys) {
++            if (!first) sb.append(',');
++            first = false;
++            sb.append(sanitize(k)).append(':');
++            JsonElement v = obj.get(k);
++            if (v.isJsonObject()) {
++                appendObject(v.getAsJsonObject(), sb);
++            } else if (v.isJsonPrimitive()) {
++                sb.append(sanitize(v.getAsString()));
++            } else {
++                sb.append(v.toString());
++            }
++        }
++        sb.append('}');
++    }
++
++    private static String sanitize(String s) {
++        StringBuilder out = new StringBuilder(s.length());
++        for (int i = 0; i < s.length(); i++) {
++            char c = s.charAt(i);
++            if ((c >= '0' && c <= '9')
++                || (c >= 'a' && c <= 'z')
++                || (c >= 'A' && c <= 'Z')
++                || c == '_' || c == '-' || c == '.') {
++                out.append(c);
++            } else {
++                out.append('_');
++            }
++        }
++        return out.toString().toLowerCase();
++    }
++}
+diff --git a/src/main/java/com/lauma/client/render/OverrideRegistry.java b/src/main/java/com/lauma/client/render/OverrideRegistry.java
+new file mode 100644
+index 0000000..80c182b
+--- /dev/null
++++ b/src/main/java/com/lauma/client/render/OverrideRegistry.java
+@@ -0,0 +1,42 @@
++package com.lauma.client.render;
++
++import com.lauma.config.OverrideEntry;
++import net.minecraft.util.Identifier;
++
++import java.util.LinkedHashMap;
++import java.util.Map;
++
++/**
++ * Per-reload registry of NBT-conditional overrides that need render-time
++ * substitution. ORMResourcePack populates this when assembling its
++ * resources; MixinLayerRenderState consumes it at draw time.
++ *
++ * <p>The atlas-stitched sprite for an entry lives at
++ * {@code minecraft:orm_overrides/<fingerprint>}.
++ */
++public final class OverrideRegistry {
++    public static final OverrideRegistry INSTANCE = new OverrideRegistry();
++
++    private final Map<String, Identifier> spriteIdByFingerprint = new LinkedHashMap<>();
++
++    private OverrideRegistry() {}
++
++    public synchronized void clear() {
++        spriteIdByFingerprint.clear();
++    }
++
++    public synchronized void register(OverrideEntry entry) {
++        if (!entry.hasNbtCondition()) return;
++        String fp = OverrideFingerprint.of(entry);
++        spriteIdByFingerprint.put(fp, Identifier.of("minecraft", "orm_overrides/" + fp));
++    }
++
++    public synchronized Identifier getSpriteId(OverrideEntry entry) {
++        if (!entry.hasNbtCondition()) return null;
++        return spriteIdByFingerprint.get(OverrideFingerprint.of(entry));
++    }
++
++    public synchronized Map<String, Identifier> snapshot() {
++        return Map.copyOf(spriteIdByFingerprint);
++    }
++}
+diff --git a/src/main/java/com/lauma/client/render/RenderContext.java b/src/main/java/com/lauma/client/render/RenderContext.java
+new file mode 100644
+index 0000000..03cb688
+--- /dev/null
++++ b/src/main/java/com/lauma/client/render/RenderContext.java
+@@ -0,0 +1,26 @@
++package com.lauma.client.render;
++
++import net.minecraft.item.ItemStack;
++
++/**
++ * Thread-local holder for the ItemStack currently being rendered.
++ * Set by MixinItemRenderer at the entry of renderItem; read by
++ * MixinLayerRenderState when wrapping the BakedModel for that layer.
++ */
++public final class RenderContext {
++    private static final ThreadLocal<ItemStack> CURRENT = new ThreadLocal<>();
++
++    private RenderContext() {}
++
++    public static void push(ItemStack stack) {
++        CURRENT.set(stack);
++    }
++
++    public static ItemStack current() {
++        return CURRENT.get();
++    }
++
++    public static void pop() {
++        CURRENT.remove();
++    }
++}
+diff --git a/src/main/java/com/lauma/client/render/TextureOverrideManager.java b/src/main/java/com/lauma/client/render/TextureOverrideManager.java
+index dfe2126..0fa90e5 100644
+--- a/src/main/java/com/lauma/client/render/TextureOverrideManager.java
++++ b/src/main/java/com/lauma/client/render/TextureOverrideManager.java
+@@ -28,17 +28,12 @@ public class TextureOverrideManager {
+     }
+ 
+     public Identifier resolveTexture(ItemStack stack) {
+-        if (stack.isEmpty()) return null;
+-        String itemId = ItemStackUtils.getItemId(stack);
+-        int cmd = NbtExtractor.getCustomModelData(stack);
+-        NbtCompound nbt = NbtExtractor.getCustomNbt(stack);
+-
+-        MatchContext ctx = new MatchContext(itemId, cmd, nbt);
+-        Optional<OverrideEntry> match = MatchPriorityResolver.resolve(ctx, config.overrides);
++        Optional<OverrideEntry> match = resolveEntry(stack);
+         if (match.isEmpty()) return null;
+-        OverrideResourceManager.LOGGER.info("ORM: match found for {} → {}", itemId, match.get().texture);
+ 
+         String texturePath = match.get().texture;
++        int cmd = NbtExtractor.getCustomModelData(stack);
++        NbtCompound nbt = NbtExtractor.getCustomNbt(stack);
+         String cacheKey = NbtFingerprintResolver.resolve(cmd, nbt) + "|" + texturePath;
+         if (cache.contains(cacheKey)) return cache.get(cacheKey);
+ 
+@@ -47,5 +42,20 @@ public class TextureOverrideManager {
+         return id;
+     }
+ 
++    /**
++     * Returns the highest-priority OverrideEntry that matches the given
++     * stack, or empty if no entry matches. Used by the render-time mixin
++     * to look up an atlas sprite via {@link OverrideRegistry}.
++     */
++    public Optional<OverrideEntry> resolveEntry(ItemStack stack) {
++        if (stack.isEmpty()) return Optional.empty();
++        String itemId = ItemStackUtils.getItemId(stack);
++        int cmd = NbtExtractor.getCustomModelData(stack);
++        NbtCompound nbt = NbtExtractor.getCustomNbt(stack);
++
++        MatchContext ctx = new MatchContext(itemId, cmd, nbt);
++        return MatchPriorityResolver.resolve(ctx, config.overrides);
++    }
++
+     public ORMConfig getConfig() { return config; }
+ }
+\ No newline at end of file
+diff --git a/src/main/java/com/lauma/client/resource/ORMResourcePack.java b/src/main/java/com/lauma/client/resource/ORMResourcePack.java
+index c028edc..34c1de4 100644
+--- a/src/main/java/com/lauma/client/resource/ORMResourcePack.java
++++ b/src/main/java/com/lauma/client/resource/ORMResourcePack.java
+@@ -1,6 +1,8 @@
+ package com.lauma.client.resource;
+ 
+ import com.lauma.OverrideResourceManager;
++import com.lauma.client.render.OverrideFingerprint;
++import com.lauma.client.render.OverrideRegistry;
+ import com.lauma.config.ORMConfig;
+ import com.lauma.config.ORMConfigManager;
+ import com.lauma.config.OverrideEntry;
+@@ -14,48 +16,106 @@ import net.minecraft.text.Text;
+ import net.minecraft.util.Identifier;
+ import org.jetbrains.annotations.Nullable;
+ 
++import java.io.ByteArrayInputStream;
+ import java.io.IOException;
+ import java.io.InputStream;
++import java.nio.charset.StandardCharsets;
+ import java.nio.file.Files;
+ import java.nio.file.Path;
+-import java.util.*;
++import java.util.HashSet;
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.List;
++import java.util.Set;
+ import java.util.stream.Collectors;
+-
++import java.util.stream.Stream;
++
++/**
++ * Resource pack injected at the top of the stack so we can replace
++ * vanilla texture files (for entries without an NBT condition) and
++ * provide additional atlas sprites (for NBT-conditional entries that
++ * are substituted at render time).
++ *
++ * <p>For each NBT-conditional entry we serve:
++ * <ul>
++ *   <li>{@code assets/minecraft/textures/orm_overrides/<fingerprint>.png}
++ *       (the user's PNG from {@code config/orm/textures/...})
++ *   <li>{@code assets/minecraft/atlases/blocks.json} with a
++ *       {@code directory} source pointing at {@code orm_overrides/} so the
++ *       PNGs get stitched into the BLOCK atlas; vanilla merges this
++ *       atlas JSON with its own.
++ * </ul>
++ *
++ * <p>{@link OverrideRegistry} is populated with the resulting sprite
++ * identifiers so the render-time mixin can look them up.
++ */
+ public class ORMResourcePack implements ResourcePack {
+-    private final Map<Identifier, Path> overrides;
++    private static final Identifier ATLAS_JSON_ID = Identifier.of("minecraft", "atlases/blocks.json");
++    private static final byte[] ATLAS_JSON_BYTES =
++        ("{\"sources\":[{\"type\":\"directory\",\"source\":\"orm_overrides\",\"prefix\":\"orm_overrides/\"}]}")
++            .getBytes(StandardCharsets.UTF_8);
++
++    private final Map<Identifier, Path> globalReplacements;
++    private final Map<Identifier, Path> overrideSprites;
+ 
+     public ORMResourcePack(ORMConfig config) {
+         this(config, List.of());
+     }
+ 
+     public ORMResourcePack(ORMConfig config, List<ResourcePack> existingPacks) {
+-        this.overrides = build(config, existingPacks);
++        OverrideRegistry.INSTANCE.clear();
++        this.globalReplacements = new LinkedHashMap<>();
++        this.overrideSprites = new LinkedHashMap<>();
++        build(config, existingPacks, this.globalReplacements, this.overrideSprites);
+     }
+ 
+-    private static Map<Identifier, Path> build(ORMConfig config, List<ResourcePack> existingPacks) {
+-        Map<Identifier, Path> map = new LinkedHashMap<>();
++    private static void build(
++        ORMConfig config,
++        List<ResourcePack> existingPacks,
++        Map<Identifier, Path> globalReplacements,
++        Map<Identifier, Path> overrideSprites
++    ) {
+         ModelTextureResolver resolver = new ModelTextureResolver(existingPacks);
+ 
+         for (OverrideEntry entry : config.overrides) {
+-            Identifier textureId = resolveTextureId(entry, resolver);
+-            if (textureId == null) continue;
+-
+-            String[] parts = entry.texture.split(":", 2);
+-            String filePath = parts.length == 2 ? parts[1] : parts[0];
+-            Path diskFile = ORMConfigManager.TEXTURE_DIR.resolve(filePath + ".png");
+-
+-            if (Files.exists(diskFile)) {
+-                map.put(textureId, diskFile);
+-                OverrideResourceManager.LOGGER.info("ORM: {} → {}", textureId, diskFile.getFileName());
+-            } else {
++            Path diskFile = resolveDiskFile(entry);
++            if (diskFile == null || !Files.exists(diskFile)) {
+                 OverrideResourceManager.LOGGER.warn("ORM: texture not found: {}", diskFile);
++                continue;
++            }
++
++            if (entry.hasNbtCondition()) {
++                // NBT-conditional entry: register sprite for render-time substitution.
++                String fp = OverrideFingerprint.of(entry);
++                Identifier spriteFile = Identifier.of(
++                    "minecraft",
++                    "textures/orm_overrides/" + fp + ".png"
++                );
++                overrideSprites.put(spriteFile, diskFile);
++                OverrideRegistry.INSTANCE.register(entry);
++                OverrideResourceManager.LOGGER.info(
++                    "ORM: sprite {} -> {}", spriteFile, diskFile.getFileName()
++                );
++                continue;
+             }
++
++            // Non-NBT entry: replace the texture file globally (legacy behaviour).
++            Identifier textureId = resolveTextureId(entry, resolver);
++            if (textureId == null) continue;
++            globalReplacements.put(textureId, diskFile);
++            OverrideResourceManager.LOGGER.info("ORM: {} -> {}", textureId, diskFile.getFileName());
+         }
+-        return map;
++    }
++
++    private static Path resolveDiskFile(OverrideEntry entry) {
++        if (entry.texture == null || entry.texture.isEmpty()) return null;
++        String[] parts = entry.texture.split(":", 2);
++        String filePath = parts.length == 2 ? parts[1] : parts[0];
++        return ORMConfigManager.TEXTURE_DIR.resolve(filePath + ".png");
+     }
+ 
+     private static Identifier resolveTextureId(OverrideEntry entry, ModelTextureResolver resolver) {
+-        // 1) explicit target wins: "ei:item/regeneration_stick" -> "ei:textures/item/regeneration_stick.png"
++        // 1) explicit target wins
+         if (entry.hasTarget()) {
+             Identifier t = Identifier.tryParse(entry.target);
+             if (t != null) {
+@@ -80,7 +140,7 @@ public class ORMResourcePack implements ResourcePack {
+             );
+         }
+ 
+-        // 3) fallback: replace the vanilla item texture (original behaviour)
++        // 3) fallback: replace the vanilla item texture
+         Identifier itemId = Identifier.tryParse(entry.item);
+         if (itemId == null) return null;
+         return Identifier.of(
+@@ -97,44 +157,63 @@ public class ORMResourcePack implements ResourcePack {
+     @Override
+     public @Nullable InputSupplier<InputStream> open(ResourceType type, Identifier id) {
+         if (type != ResourceType.CLIENT_RESOURCES) return null;
+-        Path file = overrides.get(id);
++        if (id.equals(ATLAS_JSON_ID) && !overrideSprites.isEmpty()) {
++            return () -> new ByteArrayInputStream(ATLAS_JSON_BYTES);
++        }
++        Path file = globalReplacements.get(id);
++        if (file == null) file = overrideSprites.get(id);
+         if (file == null) return null;
+-        return () -> Files.newInputStream(file);
++        final Path target = file;
++        return () -> Files.newInputStream(target);
+     }
+ 
+     @Override
+     public void findResources(ResourceType type, String namespace, String prefix, ResultConsumer consumer) {
+         if (type != ResourceType.CLIENT_RESOURCES) return;
+-        overrides.forEach((id, path) -> {
++        for (Map.Entry<Identifier, Path> e : globalReplacements.entrySet()) {
++            Identifier id = e.getKey();
+             if (id.getNamespace().equals(namespace) && id.getPath().startsWith(prefix)) {
+-                consumer.accept(id, () -> Files.newInputStream(path));
++                consumer.accept(id, () -> Files.newInputStream(e.getValue()));
+             }
+-        });
++        }
++        for (Map.Entry<Identifier, Path> e : overrideSprites.entrySet()) {
++            Identifier id = e.getKey();
++            if (id.getNamespace().equals(namespace) && id.getPath().startsWith(prefix)) {
++                consumer.accept(id, () -> Files.newInputStream(e.getValue()));
++            }
++        }
++        if (!overrideSprites.isEmpty()
++            && ATLAS_JSON_ID.getNamespace().equals(namespace)
++            && ATLAS_JSON_ID.getPath().startsWith(prefix)) {
++            consumer.accept(ATLAS_JSON_ID, () -> new ByteArrayInputStream(ATLAS_JSON_BYTES));
++        }
+     }
+ 
+     @Override
+     public Set<String> getNamespaces(ResourceType type) {
+         if (type != ResourceType.CLIENT_RESOURCES) return Set.of();
+-        return overrides.keySet().stream()
+-            .map(Identifier::getNamespace)
+-            .collect(Collectors.toSet());
++        Set<String> ns = new HashSet<>();
++        for (Identifier id : globalReplacements.keySet()) ns.add(id.getNamespace());
++        for (Identifier id : overrideSprites.keySet()) ns.add(id.getNamespace());
++        if (!overrideSprites.isEmpty()) ns.add(ATLAS_JSON_ID.getNamespace());
++        return ns;
+     }
+ 
+     @Override
+-    public @Nullable <T> T parseMetadata(ResourceMetadataSerializer<T> serializer) throws IOException {
++    public @Nullable <T> T parseMetadata(ResourceMetadataSerializer<T> serializer) {
+         return null;
+     }
+ 
+     @Override
+     public ResourcePackInfo getInfo() {
+         return new ResourcePackInfo(
+-            "orm_override_pack",
+-            Text.literal("ORM Overrides"),
++            "orm_overrides",
++            Text.of("ORM Overrides"),
+             ResourcePackSource.BUILTIN,
+-            Optional.empty()
++            java.util.Optional.empty()
+         );
+     }
+ 
+     @Override
+     public void close() {}
+-}
+\ No newline at end of file
++}
+diff --git a/src/main/java/com/lauma/mixin/MixinItemRenderer.java b/src/main/java/com/lauma/mixin/MixinItemRenderer.java
+new file mode 100644
+index 0000000..6121e6b
+--- /dev/null
++++ b/src/main/java/com/lauma/mixin/MixinItemRenderer.java
+@@ -0,0 +1,99 @@
++package com.lauma.mixin;
++
++import com.lauma.client.render.RenderContext;
++import net.minecraft.client.render.VertexConsumerProvider;
++import net.minecraft.client.render.item.ItemRenderer;
++import net.minecraft.client.util.math.MatrixStack;
++import net.minecraft.entity.LivingEntity;
++import net.minecraft.item.ItemStack;
++import net.minecraft.item.ModelTransformationMode;
++import net.minecraft.world.World;
++import org.spongepowered.asm.mixin.Mixin;
++import org.spongepowered.asm.mixin.injection.At;
++import org.spongepowered.asm.mixin.injection.Inject;
++import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
++
++/**
++ * Sets a thread-local ItemStack reference for the duration of an item
++ * render so downstream mixins (notably MixinLayerRenderState) can decide
++ * whether to swap the BakedModel for an NBT-conditional override.
++ */
++@Mixin(ItemRenderer.class)
++public abstract class MixinItemRenderer {
++
++    @Inject(
++        method = "renderItem(Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;IILnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;I)V",
++        at = @At("HEAD")
++    )
++    private void orm$pushContextSimple(
++        ItemStack stack,
++        ModelTransformationMode mode,
++        int light,
++        int overlay,
++        MatrixStack matrices,
++        VertexConsumerProvider vertexConsumers,
++        World world,
++        int seed,
++        CallbackInfo ci
++    ) {
++        RenderContext.push(stack);
++    }
++
++    @Inject(
++        method = "renderItem(Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;IILnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;I)V",
++        at = @At("RETURN")
++    )
++    private void orm$popContextSimple(
++        ItemStack stack,
++        ModelTransformationMode mode,
++        int light,
++        int overlay,
++        MatrixStack matrices,
++        VertexConsumerProvider vertexConsumers,
++        World world,
++        int seed,
++        CallbackInfo ci
++    ) {
++        RenderContext.pop();
++    }
++
++    @Inject(
++        method = "renderItem(Lnet/minecraft/entity/LivingEntity;Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;ZLnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;III)V",
++        at = @At("HEAD")
++    )
++    private void orm$pushContextLiving(
++        LivingEntity entity,
++        ItemStack stack,
++        ModelTransformationMode mode,
++        boolean leftHanded,
++        MatrixStack matrices,
++        VertexConsumerProvider vertexConsumers,
++        World world,
++        int light,
++        int overlay,
++        int seed,
++        CallbackInfo ci
++    ) {
++        RenderContext.push(stack);
++    }
++
++    @Inject(
++        method = "renderItem(Lnet/minecraft/entity/LivingEntity;Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;ZLnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;III)V",
++        at = @At("RETURN")
++    )
++    private void orm$popContextLiving(
++        LivingEntity entity,
++        ItemStack stack,
++        ModelTransformationMode mode,
++        boolean leftHanded,
++        MatrixStack matrices,
++        VertexConsumerProvider vertexConsumers,
++        World world,
++        int light,
++        int overlay,
++        int seed,
++        CallbackInfo ci
++    ) {
++        RenderContext.pop();
++    }
++}
+diff --git a/src/main/java/com/lauma/mixin/MixinLayerRenderState.java b/src/main/java/com/lauma/mixin/MixinLayerRenderState.java
+new file mode 100644
+index 0000000..f59728b
+--- /dev/null
++++ b/src/main/java/com/lauma/mixin/MixinLayerRenderState.java
+@@ -0,0 +1,71 @@
++package com.lauma.mixin;
++
++import com.lauma.OverrideResourceManager;
++import com.lauma.client.render.OverrideBakedModel;
++import com.lauma.client.render.OverrideRegistry;
++import com.lauma.client.render.RenderContext;
++import com.lauma.client.render.TextureOverrideManager;
++import com.lauma.config.OverrideEntry;
++import net.minecraft.client.MinecraftClient;
++import net.minecraft.client.render.RenderLayer;
++import net.minecraft.client.render.item.ItemRenderState;
++import net.minecraft.client.render.model.BakedModel;
++import net.minecraft.client.texture.MissingSprite;
++import net.minecraft.client.texture.Sprite;
++import net.minecraft.client.texture.SpriteAtlasTexture;
++import net.minecraft.item.ItemStack;
++import net.minecraft.util.Identifier;
++import org.spongepowered.asm.mixin.Mixin;
++import org.spongepowered.asm.mixin.injection.At;
++import org.spongepowered.asm.mixin.injection.ModifyVariable;
++
++import java.util.Optional;
++
++/**
++ * Wraps a layer's BakedModel with {@link OverrideBakedModel} when the
++ * currently rendering ItemStack (set by {@link RenderContext}) matches
++ * an NBT-conditional config entry that has a registered atlas sprite.
++ *
++ * <p>The wrapping happens in the first argument of
++ * {@link ItemRenderState.LayerRenderState#setModel(BakedModel, RenderLayer)}.
++ */
++@Mixin(ItemRenderState.LayerRenderState.class)
++public abstract class MixinLayerRenderState {
++
++    @ModifyVariable(
++        method = "setModel(Lnet/minecraft/client/render/model/BakedModel;Lnet/minecraft/client/render/RenderLayer;)V",
++        at = @At("HEAD"),
++        argsOnly = true,
++        index = 1
++    )
++    private BakedModel orm$wrapModel(BakedModel original) {
++        ItemStack stack = RenderContext.current();
++        if (stack == null || stack.isEmpty() || original == null) return original;
++
++        Optional<OverrideEntry> matched = TextureOverrideManager.INSTANCE.resolveEntry(stack);
++        if (matched.isEmpty()) return original;
++        OverrideEntry entry = matched.get();
++        if (!entry.hasNbtCondition()) return original;
++
++        Identifier spriteId = OverrideRegistry.INSTANCE.getSpriteId(entry);
++        if (spriteId == null) return original;
++
++        MinecraftClient mc = MinecraftClient.getInstance();
++        if (mc == null || mc.getBakedModelManager() == null) return original;
++
++        SpriteAtlasTexture atlas = mc.getBakedModelManager()
++            .getAtlas(SpriteAtlasTexture.BLOCK_ATLAS_TEXTURE);
++        if (atlas == null) return original;
++
++        Sprite sprite = atlas.getSprite(spriteId);
++        if (sprite == null
++            || MissingSprite.getMissingSpriteId().equals(sprite.getContents().getId())) {
++            OverrideResourceManager.LOGGER.warn(
++                "ORM: override sprite {} not stitched into atlas",
++                spriteId
++            );
++            return original;
++        }
++        return new OverrideBakedModel(original, sprite);
++    }
++}
+diff --git a/src/main/resources/orm.mixins.json b/src/main/resources/orm.mixins.json
+index 491be9e..f2f6365 100644
+--- a/src/main/resources/orm.mixins.json
++++ b/src/main/resources/orm.mixins.json
+@@ -4,7 +4,9 @@
+ 	"compatibilityLevel": "JAVA_21",
+ 	"mixins": [],
+ 	"client": [
+-		"MixinResourceManager"
++		"MixinResourceManager",
++		"MixinItemRenderer",
++		"MixinLayerRenderState"
+ 	],
+ 	"injectors": {
+ 		"defaultRequire": 1
+-- 
+2.34.1
+
