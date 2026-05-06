@@ -44,7 +44,7 @@ public class ORMConfigScreen {
         return create(parent, new ArrayList<>(ORMConfigManager.load().overrides));
     }
 
-    public static Screen create(Screen parent, List<OverrideEntry> entries) {
+    private static Screen create(Screen parent, List<OverrideEntry> entries) {
         List<EntryFields> fieldRefs = new ArrayList<>();
 
         ConfigBuilder builder = ConfigBuilder.create()
@@ -133,7 +133,7 @@ public class ORMConfigScreen {
             ORMConfigManager.save(config);
             SystemToast.add(
                 MinecraftClient.getInstance().getToastManager(),
-                SystemToast.Type.PACK_COPY_FAILURE,
+                SystemToast.Type.WORLD_BACKUP,
                 Text.literal("ORM Config Saved"),
                 Text.literal("Restart or press F3+T to apply changes")
             );

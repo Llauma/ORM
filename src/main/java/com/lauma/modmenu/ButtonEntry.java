@@ -44,7 +44,6 @@ public class ButtonEntry extends AbstractConfigListEntry<Void> {
                        int entryHeight, int mouseX, int mouseY, boolean hovered, float tickDelta) {
         button.setX(x + entryWidth / 2 - 75);
         button.setY(y);
-        button.setWidth(150);
         button.render(context, mouseX, mouseY, tickDelta);
     }
 }
