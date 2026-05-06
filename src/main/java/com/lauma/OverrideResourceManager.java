@@ -1,6 +1,7 @@
 package com.lauma;
 
 import com.lauma.client.input.ItemSelectionHandler;
+import com.lauma.client.resource.ORMModelLoadingPlugin;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.ModInitializer;
 import org.slf4j.Logger;
@@ -18,5 +19,6 @@ public class OverrideResourceManager implements ModInitializer, ClientModInitial
     @Override
     public void onInitializeClient() {
         ItemSelectionHandler.register();
+        ORMModelLoadingPlugin.register();
     }
 }

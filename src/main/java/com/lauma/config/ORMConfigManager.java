@@ -14,6 +14,7 @@ public class ORMConfigManager {
     private static final Path CONFIG_DIR = FabricLoader.getInstance().getConfigDir().resolve("orm");
     private static final Path CONFIG_FILE = CONFIG_DIR.resolve("overrides.json");
     public static final Path TEXTURE_DIR = CONFIG_DIR.resolve("textures");
+    public static final Path MODEL_DIR = CONFIG_DIR.resolve("models");
 
     public static ORMConfig load() {
         ORMConfig config = new ORMConfig();
@@ -32,7 +33,8 @@ public class ORMConfigManager {
                 if (obj.has("nbt")) entry.nbtCondition = obj.get("nbt").getAsJsonObject();
                 if (obj.has("name")) entry.name = obj.get("name").getAsString();
                 if (obj.has("target")) entry.target = obj.get("target").getAsString();
-                entry.texture = obj.get("texture").getAsString();
+                if (obj.has("model")) entry.model = obj.get("model").getAsString();
+                if (obj.has("texture")) entry.texture = obj.get("texture").getAsString();
                 config.overrides.add(entry);
             }
         } catch (Exception e) {
@@ -45,6 +47,7 @@ public class ORMConfigManager {
         try {
             Files.createDirectories(CONFIG_DIR);
             Files.createDirectories(TEXTURE_DIR);
+            Files.createDirectories(MODEL_DIR);
             JsonArray array = new JsonArray();
             for (OverrideEntry entry : config.overrides) {
                 JsonObject obj = new JsonObject();
@@ -53,7 +56,8 @@ public class ORMConfigManager {
                 if (entry.hasNbtCondition()) obj.add("nbt", entry.nbtCondition);
                 if (entry.hasName()) obj.addProperty("name", entry.name);
                 if (entry.hasTarget()) obj.addProperty("target", entry.target);
-                obj.addProperty("texture", entry.texture);
+                if (entry.hasModel()) obj.addProperty("model", entry.model);
+                if (entry.hasTexture()) obj.addProperty("texture", entry.texture);
                 array.add(obj);
             }
             try (Writer w = new OutputStreamWriter(new FileOutputStream(CONFIG_FILE.toFile()), StandardCharsets.UTF_8)) {
