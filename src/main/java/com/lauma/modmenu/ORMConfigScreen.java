@@ -135,7 +135,7 @@ public class ORMConfigScreen {
                 MinecraftClient.getInstance().getToastManager(),
                 SystemToast.Type.PACK_COPY_FAILURE,
                 Text.literal("ORM Config Saved"),
-                Text.literal("Restart or press F3+T to apply")
+                Text.literal("Restart or press F3+T to apply changes")
             );
         });
 
