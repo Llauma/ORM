@@ -34,13 +34,27 @@ public class ItemSelectionHandler {
     }
 
     private static ItemStack getHoveredStack(HandledScreen<?> screen) {
+        Slot slot = null;
         try {
-            Field f = HandledScreen.class.getDeclaredField("focusedSlot");
-            f.setAccessible(true);
-            Object slot = f.get(screen);
-            if (slot instanceof Slot s) return s.getStack();
-        } catch (Exception ignored) {}
-        return null;
+            try {
+                Field f = HandledScreen.class.getDeclaredField("focusedSlot");
+                f.setAccessible(true);
+                slot = (Slot) f.get(screen);
+            } catch (NoSuchFieldException ignored) {}
+
+            if (slot == null) {
+                try {
+                    Field f = HandledScreen.class.getDeclaredField("field_2787");
+                    f.setAccessible(true);
+                    slot = (Slot) f.get(screen);
+                } catch (NoSuchFieldException ignored) {}
+            }
+
+            return slot != null ? slot.getStack() : null;
+
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private static void recordOverride(ItemStack stack) {
@@ -54,7 +68,7 @@ public class ItemSelectionHandler {
         if (displayName != null && !displayName.isEmpty()) {
             entry.name = displayName;
         }
-        // Placeholder texture path — user fills in actual PNG name
+
         String texName = itemId.replace(":", "/") + (cmd >= 0 ? "_" + cmd : "");
         entry.texture = "orm:" + texName;
 
@@ -67,7 +81,7 @@ public class ItemSelectionHandler {
         );
     }
 
-    // kept for compatibility, no longer used by recordOverride
+
     private static JsonObject nbtToJson(NbtCompound nbt) {
         JsonObject obj = new JsonObject();
         for (String key : nbt.getKeys()) {

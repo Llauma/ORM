@@ -76,10 +76,6 @@ public class ORMResourcePack implements ResourcePack {
 
         for (OverrideEntry entry : config.overrides) {
             if (entry.isPerInstance()) {
-                // Per-instance entry: register sprite for render-time substitution.
-                // Only do sprite-stitching if a texture file is provided; entries with
-                // only `model` rely on the user's JSON model + textures served via
-                // the user-asset path.
                 if (entry.hasTexture()) {
                     Path diskFile = resolveDiskFile(entry);
                     if (diskFile == null || !Files.exists(diskFile)) {
@@ -100,7 +96,6 @@ public class ORMResourcePack implements ResourcePack {
                 continue;
             }
 
-            // Non per-instance entry: replace the texture file globally (legacy behaviour).
             if (!entry.hasTexture()) continue;
             Path diskFile = resolveDiskFile(entry);
             if (diskFile == null || !Files.exists(diskFile)) {
@@ -163,7 +158,6 @@ public class ORMResourcePack implements ResourcePack {
                             OverrideResourceManager.LOGGER.info("ORM: serving {} -> {}", id, p);
                         }
 
-                        // Backward-compat alias for flat layout (file directly under root).
                         if (!relStr.contains("/")) {
                             String name = p.getFileName().toString();
                             Identifier flatId = Identifier.of("orm", topLevel + "/item/" + name);
@@ -183,7 +177,6 @@ public class ORMResourcePack implements ResourcePack {
     }
 
     private static Identifier resolveTextureId(OverrideEntry entry, ModelTextureResolver resolver) {
-        // 1) explicit target wins
         if (entry.hasTarget()) {
             Identifier t = Identifier.tryParse(entry.target);
             if (t != null) {
@@ -192,7 +185,6 @@ public class ORMResourcePack implements ResourcePack {
             OverrideResourceManager.LOGGER.warn("ORM: invalid target id: {}", entry.target);
         }
 
-        // 2) auto-resolve via the custom-model-data override chain
         if (entry.hasCustomModelData()) {
             Identifier resolved = resolver.resolve(entry.item, entry.customModelData);
             if (resolved != null) {
@@ -208,7 +200,6 @@ public class ORMResourcePack implements ResourcePack {
             );
         }
 
-        // 3) fallback: replace the vanilla item texture
         Identifier itemId = Identifier.tryParse(entry.item);
         if (itemId == null) return null;
         return Identifier.of(

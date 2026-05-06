@@ -18,7 +18,5 @@ public class OverrideEntry {
     public boolean hasTexture() { return texture != null && !texture.isEmpty(); }
     public boolean hasModel() { return model != null && !model.isEmpty(); }
 
-    /** True if this entry needs render-time substitution
-     *  (per-instance match by name/nbt, OR custom 3D model swap). */
     public boolean isPerInstance() { return hasNbtCondition() || hasName() || hasModel(); }
 }

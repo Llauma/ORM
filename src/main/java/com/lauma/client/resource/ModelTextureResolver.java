@@ -115,8 +115,6 @@ public class ModelTextureResolver {
                 return walkFallback(node, cmd);
 
             case "condition": {
-                // Cannot evaluate runtime conditions here; prefer the default
-                // (on_false) branch, then on_true as a best-effort fallback.
                 String r = walkBranch(node, "on_false", cmd);
                 if (r != null) return r;
                 return walkBranch(node, "on_true", cmd);

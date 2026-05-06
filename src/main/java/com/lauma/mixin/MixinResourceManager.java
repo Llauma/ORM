@@ -20,8 +20,6 @@ public class MixinResourceManager {
     )
     private List<ResourcePack> injectOrmPack(List<ResourcePack> packs) {
         List<ResourcePack> modified = new ArrayList<>(packs);
-        // Reload config from disk so render-time matcher and ORMResourcePack
-        // share the same source of truth.
         TextureOverrideManager.INSTANCE.reload();
         modified.add(new ORMResourcePack(TextureOverrideManager.INSTANCE.getConfig(), packs));
         return modified;

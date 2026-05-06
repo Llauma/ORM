@@ -63,7 +63,6 @@ public abstract class MixinLayerRenderState {
                 entry.hasModel(), entry.hasTexture());
         if (!entry.isPerInstance()) return original;
 
-        // 1) custom 3D model swap takes priority
         if (entry.hasModel()) {
             BakedModel custom = lookupCustomModel(entry.model);
             if (custom != null) {
@@ -77,7 +76,6 @@ public abstract class MixinLayerRenderState {
                     entry.model);
         }
 
-        // 2) texture sprite substitution
         if (!entry.hasTexture()) return original;
         Identifier spriteId = OverrideRegistry.INSTANCE.getSpriteId(entry);
         if (spriteId == null) {
