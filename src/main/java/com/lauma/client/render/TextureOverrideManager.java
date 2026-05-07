@@ -13,16 +13,13 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.util.Identifier;
 
-import java.util.HashSet;
 import java.util.Optional;
-import java.util.Set;
 
 public class TextureOverrideManager {
     public static final TextureOverrideManager INSTANCE = new TextureOverrideManager();
 
     private ORMConfig config = new ORMConfig();
     private final TextureCache cache = new TextureCache();
-    private final Set<String> diagnosedItems = new HashSet<>();
 
     public void reload() {
         cache.clear();
@@ -53,33 +50,7 @@ public class TextureOverrideManager {
         String displayName = ItemStackUtils.getDisplayName(stack);
 
         MatchContext ctx = new MatchContext(itemId, cmd, nbt, displayName);
-        Optional<OverrideEntry> result = MatchPriorityResolver.resolve(ctx, config.overrides);
-
-        if (result.isEmpty()) {
-            boolean hasEntryForThisItem = false;
-            for (OverrideEntry e : config.overrides) {
-                if (itemId.equals(e.item)) { hasEntryForThisItem = true; break; }
-            }
-            if (hasEntryForThisItem) {
-                synchronized (diagnosedItems) {
-                    if (diagnosedItems.add(itemId)) {
-                        OverrideResourceManager.LOGGER.info(
-                                "ORM[diagnose] {} no match. ctx_cmd={}, ctx_name={}, ctx_nbt={}",
-                                itemId, cmd, displayName, (nbt == null ? "null" : nbt.toString())
-                        );
-                        for (OverrideEntry e : config.overrides) {
-                            if (!itemId.equals(e.item)) continue;
-                            OverrideResourceManager.LOGGER.info(
-                                    "ORM[diagnose]   entry: cmd={}, name={}, nbtCondition={}",
-                                    e.customModelData, e.name,
-                                    (e.nbtCondition == null ? "null" : e.nbtCondition.toString())
-                            );
-                        }
-                    }
-                }
-            }
-        }
-        return result;
+        return MatchPriorityResolver.resolve(ctx, config.overrides);
     }
 
     public ORMConfig getConfig() { return config; }

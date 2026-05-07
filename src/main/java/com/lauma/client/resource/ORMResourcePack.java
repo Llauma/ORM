@@ -6,6 +6,8 @@ import com.lauma.client.render.OverrideRegistry;
 import com.lauma.config.ORMConfig;
 import com.lauma.config.ORMConfigManager;
 import com.lauma.config.OverrideEntry;
+import com.lauma.util.ChatUtils;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.resource.InputSupplier;
 import net.minecraft.resource.ResourcePack;
 import net.minecraft.resource.ResourcePackInfo;
@@ -73,6 +75,7 @@ public class ORMResourcePack implements ResourcePack {
             Map<Identifier, Path> overrideSprites
     ) {
         ModelTextureResolver resolver = new ModelTextureResolver(existingPacks);
+        MinecraftClient mc = MinecraftClient.getInstance();
 
         for (OverrideEntry entry : config.overrides) {
             if (entry.isPerInstance()) {
@@ -80,6 +83,14 @@ public class ORMResourcePack implements ResourcePack {
                     Path diskFile = resolveDiskFile(entry);
                     if (diskFile == null || !Files.exists(diskFile)) {
                         OverrideResourceManager.LOGGER.warn("ORM: texture not found: {}", diskFile);
+                        if (mc != null) {
+                            final String id = entry.item;
+                            final boolean hasModel = entry.hasModel();
+                            mc.execute(() -> {
+                                if (hasModel) ChatUtils.modelNoTextures(id);
+                                else ChatUtils.texturesNotFound(id);
+                            });
+                        }
                     } else {
                         String fp = OverrideFingerprint.of(entry);
                         Identifier spriteFile = Identifier.of(
@@ -91,6 +102,15 @@ public class ORMResourcePack implements ResourcePack {
                         OverrideResourceManager.LOGGER.info(
                                 "ORM: sprite {} -> {}", spriteFile, diskFile.getFileName()
                         );
+                        if (mc != null) {
+                            final String id = entry.item;
+                            mc.execute(() -> ChatUtils.modelAndTexturesFound(id));
+                        }
+                    }
+                } else if (entry.hasModel()) {
+                    if (mc != null) {
+                        final String id = entry.item;
+                        mc.execute(() -> ChatUtils.modelLoaded(id));
                     }
                 }
                 continue;
@@ -100,12 +120,20 @@ public class ORMResourcePack implements ResourcePack {
             Path diskFile = resolveDiskFile(entry);
             if (diskFile == null || !Files.exists(diskFile)) {
                 OverrideResourceManager.LOGGER.warn("ORM: texture not found: {}", diskFile);
+                if (mc != null) {
+                    final String id = entry.item;
+                    mc.execute(() -> ChatUtils.texturesNotFound(id));
+                }
                 continue;
             }
             Identifier textureId = resolveTextureId(entry, resolver);
             if (textureId == null) continue;
             globalReplacements.put(textureId, diskFile);
             OverrideResourceManager.LOGGER.info("ORM: {} -> {}", textureId, diskFile.getFileName());
+            if (mc != null) {
+                final String id = entry.item;
+                mc.execute(() -> ChatUtils.modelAndTexturesFound(id));
+            }
         }
     }
 
@@ -224,7 +252,21 @@ public class ORMResourcePack implements ResourcePack {
         if (file == null) file = userAssets.get(id);
         if (file == null) return null;
         final Path target = file;
+        if (target.getFileName().toString().endsWith(".json")) {
+            return () -> new ByteArrayInputStream(patchModelJson(Files.readAllBytes(target)));
+        }
         return () -> Files.newInputStream(target);
+    }
+
+    private static byte[] patchModelJson(byte[] original) {
+        try {
+            String json = new String(original, StandardCharsets.UTF_8);
+            if (!json.contains("\"#missing\"")) return original;
+            json = json.replace("\"#missing\"", "\"#0\"");
+            return json.getBytes(StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return original;
+        }
     }
 
     @Override

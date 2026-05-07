@@ -16,15 +16,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ItemRenderer.class)
 public abstract class MixinItemRenderer {
 
-    private static volatile boolean ormLoggedSimple = false;
-    private static volatile boolean ormLoggedLiving = false;
-
     @Inject(method = "renderItem(Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;IILnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;I)V", at = @At("HEAD"))
     private void orm$pushSimple(ItemStack stack, ModelTransformationMode m, int l, int o, MatrixStack ms, VertexConsumerProvider vcp, World w, int s, CallbackInfo ci) {
-        if (!ormLoggedSimple) {
-            ormLoggedSimple = true;
-            com.lauma.OverrideResourceManager.LOGGER.info("ORM[debug:itemrenderer-simple] first call, stack={}", stack.getItem());
-        }
         RenderContext.push(stack);
     }
 
@@ -35,10 +28,6 @@ public abstract class MixinItemRenderer {
 
     @Inject(method = "renderItem(Lnet/minecraft/entity/LivingEntity;Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;ZLnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;III)V", at = @At("HEAD"))
     private void orm$pushLiving(LivingEntity e, ItemStack stack, ModelTransformationMode m, boolean lh, MatrixStack ms, VertexConsumerProvider vcp, World w, int l, int o, int s, CallbackInfo ci) {
-        if (!ormLoggedLiving) {
-            ormLoggedLiving = true;
-            com.lauma.OverrideResourceManager.LOGGER.info("ORM[debug:itemrenderer-living] first call, stack={}", stack.getItem());
-        }
         RenderContext.push(stack);
     }
 

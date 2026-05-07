@@ -1,12 +1,12 @@
 package com.lauma.client.input;
 
 import com.google.gson.JsonObject;
-import com.lauma.OverrideResourceManager;
 import com.lauma.client.render.TextureOverrideManager;
 import com.lauma.config.ORMConfig;
 import com.lauma.config.ORMConfigManager;
 import com.lauma.config.OverrideEntry;
 import com.lauma.nbt.NbtExtractor;
+import com.lauma.util.ChatUtils;
 import com.lauma.util.ItemStackUtils;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
@@ -24,7 +24,7 @@ public class ItemSelectionHandler {
     public static void register() {
         ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
             ScreenMouseEvents.afterMouseClick(screen).register((s, mouseX, mouseY, button) -> {
-                if (button != 2) return; // middle click only
+                if (ORMKeyBindings.ADD_ITEM == null || !ORMKeyBindings.ADD_ITEM.matchesMouse(button)) return;
                 if (!(s instanceof HandledScreen<?> hs)) return;
                 ItemStack stack = getHoveredStack(hs);
                 if (stack == null || stack.isEmpty()) return;
@@ -75,10 +75,7 @@ public class ItemSelectionHandler {
         ORMConfig config = TextureOverrideManager.INSTANCE.getConfig();
         config.overrides.add(entry);
         ORMConfigManager.save(config);
-        OverrideResourceManager.LOGGER.info(
-                "ORM: recorded override for {} (cmd={}, name={}) -> {} -- edit texture in config and run F3+T",
-                itemId, cmd, displayName, entry.texture
-        );
+        ChatUtils.itemAdded(itemId);
     }
 
 
