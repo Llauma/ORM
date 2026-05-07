@@ -33,6 +33,7 @@ public abstract class MixinLayerRenderState {
             index = 1
     )
     private BakedModel orm$wrapModel(BakedModel original) {
+        if (!RenderContext.isOverrideMode()) return original;
         ItemStack stack = RenderContext.current();
         if (stack == null || stack.isEmpty() || original == null) return original;
 

@@ -223,9 +223,10 @@ public class ORMResourcePack implements ResourcePack {
                 return resolved;
             }
             OverrideResourceManager.LOGGER.warn(
-                    "ORM: cannot auto-resolve target for {}#{} - falling back to vanilla item texture",
+                    "ORM: cannot auto-resolve target for {}#{} - skipping entry (no vanilla texture fallback)",
                     entry.item, entry.customModelData
             );
+            return null;
         }
 
         Identifier itemId = Identifier.tryParse(entry.item);

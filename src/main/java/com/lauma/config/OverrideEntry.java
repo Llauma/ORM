@@ -18,5 +18,5 @@ public class OverrideEntry {
     public boolean hasTexture() { return texture != null && !texture.isEmpty(); }
     public boolean hasModel() { return model != null && !model.isEmpty(); }
 
-    public boolean isPerInstance() { return hasNbtCondition() || hasName() || hasModel(); }
+    public boolean isPerInstance() { return hasNbtCondition() || hasName() || hasModel() || hasCustomModelData(); }
 }

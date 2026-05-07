@@ -1,0 +1,136 @@
+diff --git a/src/main/java/com/lauma/client/render/RenderContext.java b/src/main/java/com/lauma/client/render/RenderContext.java
+index 32a5028..7243d05 100644
+--- a/src/main/java/com/lauma/client/render/RenderContext.java
++++ b/src/main/java/com/lauma/client/render/RenderContext.java
+@@ -1,11 +1,41 @@
+ package com.lauma.client.render;
+-
++
+ import net.minecraft.item.ItemStack;
+-
++import net.minecraft.item.ModelTransformationMode;
++
++import java.util.Set;
++
+ public final class RenderContext {
+-    private static final ThreadLocal<ItemStack> CURRENT = new ThreadLocal<>();
++    private static final Set<ModelTransformationMode> OVERRIDE_MODES = Set.of(
++            ModelTransformationMode.FIRST_PERSON_RIGHT_HAND,
++            ModelTransformationMode.FIRST_PERSON_LEFT_HAND,
++            ModelTransformationMode.THIRD_PERSON_RIGHT_HAND,
++            ModelTransformationMode.THIRD_PERSON_LEFT_HAND,
++            ModelTransformationMode.GUI,
++            ModelTransformationMode.HEAD,
++            ModelTransformationMode.FIXED,
++            ModelTransformationMode.GROUND
++    );
++
++    private static final ThreadLocal<ItemStack> CURRENT_STACK = new ThreadLocal<>();
++    private static final ThreadLocal<ModelTransformationMode> CURRENT_MODE = new ThreadLocal<>();
++
+     private RenderContext() {}
+-    public static void push(ItemStack stack) { CURRENT.set(stack); }
+-    public static ItemStack current() { return CURRENT.get(); }
+-    public static void pop() { CURRENT.remove(); }
++
++    public static void push(ItemStack stack, ModelTransformationMode mode) {
++        CURRENT_STACK.set(stack);
++        CURRENT_MODE.set(mode);
++    }
++
++    public static ItemStack current() { return CURRENT_STACK.get(); }
++
++    public static boolean isOverrideMode() {
++        ModelTransformationMode mode = CURRENT_MODE.get();
++        return mode != null && OVERRIDE_MODES.contains(mode);
++    }
++
++    public static void pop() {
++        CURRENT_STACK.remove();
++        CURRENT_MODE.remove();
++    }
+ }
+\ No newline at end of file
+diff --git a/src/main/java/com/lauma/client/resource/ORMResourcePack.java b/src/main/java/com/lauma/client/resource/ORMResourcePack.java
+index 0b8faf9..5cdf531 100644
+--- a/src/main/java/com/lauma/client/resource/ORMResourcePack.java
++++ b/src/main/java/com/lauma/client/resource/ORMResourcePack.java
+@@ -223,9 +223,10 @@ public class ORMResourcePack implements ResourcePack {
+                 return resolved;
+             }
+             OverrideResourceManager.LOGGER.warn(
+-                    "ORM: cannot auto-resolve target for {}#{} - falling back to vanilla item texture",
++                    "ORM: cannot auto-resolve target for {}#{} - skipping entry (no vanilla texture fallback)",
+                     entry.item, entry.customModelData
+             );
++            return null;
+         }
+
+         Identifier itemId = Identifier.tryParse(entry.item);
+diff --git a/src/main/java/com/lauma/config/OverrideEntry.java b/src/main/java/com/lauma/config/OverrideEntry.java
+index d71d2a3..3b00448 100644
+--- a/src/main/java/com/lauma/config/OverrideEntry.java
++++ b/src/main/java/com/lauma/client/render/OverrideEntry.java
+@@ -18,5 +18,5 @@ public class OverrideEntry {
+     public boolean hasTexture() { return texture != null && !texture.isEmpty(); }
+     public boolean hasModel() { return model != null && !model.isEmpty(); }
+
+-    public boolean isPerInstance() { return hasNbtCondition() || hasName() || hasModel(); }
++    public boolean isPerInstance() { return hasNbtCondition() || hasName() || hasModel() || hasCustomModelData(); }
+ }
+\ No newline at end of file
+diff --git a/src/main/java/com/lauma/mixin/MixinItemModelManager.java b/src/main/java/com/lauma/mixin/MixinItemModelManager.java
+index ee1a8e7..1290445 100644
+--- a/src/main/java/com/lauma/mixin/MixinItemModelManager.java
++++ b/src/main/java/com/lauma/mixin/MixinItemModelManager.java
+@@ -20,7 +20,7 @@ public abstract class MixinItemModelManager {
+         at = @At("HEAD")
+     )
+     private void orm$pushUpdate7(ItemRenderState state, ItemStack stack, ModelTransformationMode mode, boolean leftHanded, World world, LivingEntity entity, int seed, CallbackInfo ci) {
+-        RenderContext.push(stack);
++        RenderContext.push(stack, mode);
+     }
+
+     @Inject(
+@@ -36,7 +36,7 @@ public abstract class MixinItemModelManager {
+         at = @At("HEAD")
+     )
+     private void orm$pushUpdate6(ItemRenderState state, ItemStack stack, ModelTransformationMode mode, World world, LivingEntity entity, int seed, CallbackInfo ci) {
+-        RenderContext.push(stack);
++        RenderContext.push(stack, mode);
+     }
+
+     @Inject(
+diff --git a/src/main/java/com/lauma/mixin/MixinItemRenderer.java b/src/main/java/com/lauma/mixin/MixinItemRenderer.java
+index 9f05ee0..5d1755e 100644
+--- a/src/main/java/com/lauma/mixin/MixinItemRenderer.java
++++ b/src/main/java/com/lauma/mixin/MixinItemRenderer.java
+@@ -18,7 +18,7 @@ public abstract class MixinItemRenderer {
+
+     @Inject(method = "renderItem(Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;IILnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;I)V", at = @At("HEAD"))
+     private void orm$pushSimple(ItemStack stack, ModelTransformationMode m, int l, int o, MatrixStack ms, VertexConsumerProvider vcp, World w, int s, CallbackInfo ci) {
+-        RenderContext.push(stack);
++        RenderContext.push(stack, m);
+     }
+
+     @Inject(method = "renderItem(Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;IILnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;I)V", at = @At("RETURN"))
+@@ -28,7 +28,7 @@ public abstract class MixinItemRenderer {
+
+     @Inject(method = "renderItem(Lnet/minecraft/entity/LivingEntity;Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;ZLnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;III)V", at = @At("HEAD"))
+     private void orm$pushLiving(LivingEntity e, ItemStack stack, ModelTransformationMode m, boolean lh, MatrixStack ms, VertexConsumerProvider vcp, World w, int l, int o, int s, CallbackInfo ci) {
+-        RenderContext.push(stack);
++        RenderContext.push(stack, m);
+     }
+
+     @Inject(method = "renderItem(Lnet/minecraft/entity/LivingEntity;Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;ZLnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;III)V", at = @At("RETURN"))
+diff --git a/src/main/java/com/lauma/mixin/MixinLayerRenderState.java b/src/main/java/com/lauma/mixin/MixinLayerRenderState.java
+index fb73692..fa4caf7 100644
+--- a/src/main/java/com/lauma/mixin/MixinLayerRenderState.java
++++ b/src/main/java/com/lauma/mixin/MixinLayerRenderState.java
+@@ -33,6 +33,7 @@ public abstract class MixinLayerRenderState {
+             index = 1
+     )
+     private BakedModel orm$wrapModel(BakedModel original) {
++        if (!RenderContext.isOverrideMode()) return original;
+         ItemStack stack = RenderContext.current();
+         if (stack == null || stack.isEmpty() || original == null) return original;

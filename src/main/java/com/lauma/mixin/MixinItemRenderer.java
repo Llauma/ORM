@@ -18,7 +18,7 @@ public abstract class MixinItemRenderer {
 
     @Inject(method = "renderItem(Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;IILnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;I)V", at = @At("HEAD"))
     private void orm$pushSimple(ItemStack stack, ModelTransformationMode m, int l, int o, MatrixStack ms, VertexConsumerProvider vcp, World w, int s, CallbackInfo ci) {
-        RenderContext.push(stack);
+        RenderContext.push(stack, m);
     }
 
     @Inject(method = "renderItem(Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;IILnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;I)V", at = @At("RETURN"))
@@ -28,7 +28,7 @@ public abstract class MixinItemRenderer {
 
     @Inject(method = "renderItem(Lnet/minecraft/entity/LivingEntity;Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;ZLnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;III)V", at = @At("HEAD"))
     private void orm$pushLiving(LivingEntity e, ItemStack stack, ModelTransformationMode m, boolean lh, MatrixStack ms, VertexConsumerProvider vcp, World w, int l, int o, int s, CallbackInfo ci) {
-        RenderContext.push(stack);
+        RenderContext.push(stack, m);
     }
 
     @Inject(method = "renderItem(Lnet/minecraft/entity/LivingEntity;Lnet/minecraft/item/ItemStack;Lnet/minecraft/item/ModelTransformationMode;ZLnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;Lnet/minecraft/world/World;III)V", at = @At("RETURN"))

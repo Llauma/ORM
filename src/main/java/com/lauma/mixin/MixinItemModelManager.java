@@ -20,7 +20,7 @@ public abstract class MixinItemModelManager {
         at = @At("HEAD")
     )
     private void orm$pushUpdate7(ItemRenderState state, ItemStack stack, ModelTransformationMode mode, boolean leftHanded, World world, LivingEntity entity, int seed, CallbackInfo ci) {
-        RenderContext.push(stack);
+        RenderContext.push(stack, mode);
     }
 
     @Inject(
@@ -36,7 +36,7 @@ public abstract class MixinItemModelManager {
         at = @At("HEAD")
     )
     private void orm$pushUpdate6(ItemRenderState state, ItemStack stack, ModelTransformationMode mode, World world, LivingEntity entity, int seed, CallbackInfo ci) {
-        RenderContext.push(stack);
+        RenderContext.push(stack, mode);
     }
 
     @Inject(
