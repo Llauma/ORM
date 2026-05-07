@@ -15,6 +15,7 @@ classes/
 *.iml
 *.ipr
 *.iws
+.claude
 
 # vscode
 
@@ -31,6 +32,7 @@ bin/
 # fabric
 
 run/
+!run/config/orm
 
 # java
 
